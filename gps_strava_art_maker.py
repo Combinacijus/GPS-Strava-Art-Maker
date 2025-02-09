@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
 
         # For demonstration, try loading a default SVG.
         try:
-            self.load_svg("drawing.svg")
+            self.load_svg("drawing_test.svg")
         except Exception:
             pass
 

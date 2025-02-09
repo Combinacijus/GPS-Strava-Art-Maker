@@ -1,11 +1,11 @@
 # GPS STRAVA ART MAKER
+<img src="docs/GUI.png" alt="GPS Strava Art Maker GUI" width="30%">
 
 ## How to run
-
 Open powershell and run these commands
 ```
 cd C:\<PATH_TO_FOLDER>
-python -m pip install -r .\requirements.txt  # Installs dependencies. Can be run only once
+python -m pip install -r .\requirements.txt  # Installs dependencies. Should be run only once
 python ./gps_strava_art_maker.py  # Starts the main program
 ```
 Note: If bottom pane is white wait until maps are loaded  
@@ -30,7 +30,7 @@ Note: If bottom pane is white wait until maps are loaded
 5. Press `Load SVG` (or `Load GPX`)
 6. You can see loaded file at the top pane and GPX path on bottom pane map
 7. Panes can be resized by hand or by pressing expand icon in the right corner of the panes
-8. Set `Path lenght` to resize
+8. Set `Path length` to resize. This parameter show final path length in kilometers
 9. Set `Rotation`
 10. Set `Stretch` to change image ratio
 11. To relocate path path drag the blue handle on the map or move the map and press `Move Path to Center`
@@ -40,4 +40,6 @@ Note: If bottom pane is white wait until maps are loaded
 15. Check if programs open gpx file correctly (some app like to follow existing paths, roads instead of given gpx)
 16. Go outside and complete the path!
 
-<img src="docs/GUI.png" alt="GPS Strava Art Maker GUI" width="50%">
+## Sample files
+- [drawing_test.svg](./drawing_test.svg)
+- [drawing_test.gpx](./drawing_test.gpx)
