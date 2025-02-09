@@ -5,7 +5,7 @@ QMainWindow {
 }
 
 QPushButton {
-    font-size: 16px;
+    font-size: 20px;
     padding: 12px 20px;
     background-color: #007ACC;
     color: white;

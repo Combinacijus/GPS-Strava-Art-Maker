@@ -1,3 +1,4 @@
+# svg_gpx_manager.py
 import os
 import numpy as np
 import matplotlib.pyplot as plt
