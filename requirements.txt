@@ -1,6 +1,8 @@
+PyQt5
+PyQtWebEngine
 numpy
 matplotlib
+folium
 gpxpy
-PyQt5
 svgpathtools
 geopy

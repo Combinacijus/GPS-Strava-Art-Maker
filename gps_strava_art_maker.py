@@ -81,12 +81,13 @@ class MainWindow(QMainWindow):
         self.save_button.clicked.connect(self.save_gpx)
         action_layout.addWidget(self.save_button)
         main_layout.addLayout(action_layout)
+        
 
         # ----- Path Length Controls (existing) -----
         slider_layout = QHBoxLayout()
         self.path_length_label = QLabel("Path Length (km)")
         self.path_length_label.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
         self.path_length_label.setFixedWidth(250)
         slider_layout.addWidget(self.path_length_label)
@@ -94,7 +95,7 @@ class MainWindow(QMainWindow):
         self.path_length_input = QLineEdit("1.00")
         self.path_length_input.setPlaceholderText("Length (km):")
         self.path_length_input.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
         self.path_length_input.setFixedWidth(100)
         self.path_length_input.editingFinished.connect(self.update_path_length_from_input)
@@ -111,73 +112,73 @@ class MainWindow(QMainWindow):
         # New button: "Move Path to Center"
         self.move_path_button = QPushButton("Move Path to Center")
         self.move_path_button.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
         self.move_path_button.clicked.connect(self.move_path_to_center)
         slider_layout.addWidget(self.move_path_button)
 
         main_layout.addLayout(slider_layout)
 
-        # ----- New Transformation Controls -----
-        # Rotation control row
-        rotation_layout = QHBoxLayout()
+        # Combined rotation and horizontal scale row
+        control_layout = QHBoxLayout()
+
+        # Rotation control
         self.rotation_label = QLabel("Rotation (deg)")
         self.rotation_label.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
-        self.rotation_label.setFixedWidth(250)
-        rotation_layout.addWidget(self.rotation_label)
+        self.rotation_label.setFixedWidth(180)
+        control_layout.addWidget(self.rotation_label)
 
         self.rotation_input = QLineEdit("0")
         self.rotation_input.setPlaceholderText("0")
         self.rotation_input.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
-        self.rotation_input.setFixedWidth(100)
+        self.rotation_input.setFixedWidth(80)
         self.rotation_input.editingFinished.connect(self.update_rotation_from_input)
-        rotation_layout.addWidget(self.rotation_input)
+        control_layout.addWidget(self.rotation_input)
 
         self.rotation_slider = QSlider(Qt.Horizontal)
         self.rotation_slider.setMinimum(-180)
         self.rotation_slider.setMaximum(180)
         self.rotation_slider.setValue(0)
         self.rotation_slider.valueChanged.connect(self.update_rotation_from_slider)
-        rotation_layout.addWidget(self.rotation_slider)
+        control_layout.addWidget(self.rotation_slider)
 
-        main_layout.addLayout(rotation_layout)
-
-        # Horizontal scaling control row
-        hor_scale_layout = QHBoxLayout()
-        self.hor_scale_label = QLabel("Horizontal Scale (%)")
-        self.hor_scale_label.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        # Horizontal scale control
+        self.stretch_label = QLabel("Stretch (%)")
+        self.stretch_label.setStyleSheet(
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
-        self.hor_scale_label.setFixedWidth(250)
-        hor_scale_layout.addWidget(self.hor_scale_label)
+        self.stretch_label.setFixedWidth(200)
+        control_layout.addWidget(self.stretch_label)
 
-        self.hor_scale_input = QLineEdit("100")
-        self.hor_scale_input.setPlaceholderText("100")
-        self.hor_scale_input.setStyleSheet(
-            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        self.stretch_input = QLineEdit("100")
+        self.stretch_input.setPlaceholderText("100")
+        self.stretch_input.setStyleSheet(
+            "font-size: 16px; padding: 5px 15px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
-        self.hor_scale_input.setFixedWidth(100)
-        self.hor_scale_input.editingFinished.connect(self.update_hor_scale_from_input)
-        hor_scale_layout.addWidget(self.hor_scale_input)
+        self.stretch_input.setFixedWidth(80)
+        self.stretch_input.editingFinished.connect(self.update_stretch_from_input)
+        control_layout.addWidget(self.stretch_input)
 
-        self.hor_scale_slider = QSlider(Qt.Horizontal)
-        self.hor_scale_slider.setMinimum(50)  # 50% = 0.5
-        self.hor_scale_slider.setMaximum(200)  # 200% = 2.0
-        self.hor_scale_slider.setValue(100)  # default 100% = 1.0
-        self.hor_scale_slider.valueChanged.connect(self.update_hor_scale_from_slider)
-        hor_scale_layout.addWidget(self.hor_scale_slider)
+        self.stretch_slider = QSlider(Qt.Horizontal)
+        self.stretch_slider.setMinimum(25)
+        self.stretch_slider.setMaximum(400)
+        self.stretch_slider.setValue(100)  # default 100% = 1.0
+        self.stretch_slider.valueChanged.connect(self.update_stretch_from_slider)
+        control_layout.addWidget(self.stretch_slider)
 
-        main_layout.addLayout(hor_scale_layout)
+        # Add the combined layout to the main layout
+        main_layout.addLayout(control_layout)
+
 
         # Panes.
         self.plot_pane = ResizablePane("Plot", self.plot_canvas, "plot")
         self.map_pane = ResizablePane("Map", self.map_view, "map")
         self.splitter = PaneManager(Qt.Vertical, [self.plot_pane, self.map_pane])
-        self.splitter.setSizes([500, 500])
+        self.splitter.setSizes([300, 700])
         main_layout.addWidget(self.splitter)
 
         self.status_label = QLabel("Status: Ready")
@@ -230,8 +231,8 @@ class MainWindow(QMainWindow):
     def update_all_slider_from_gpx(self, gpx):
         self.rotation_slider.setValue(0)
         self.rotation_input.setPlaceholderText("0")
-        self.hor_scale_slider.setValue(100)
-        self.hor_scale_input.setPlaceholderText("100")
+        self.stretch_slider.setValue(100)
+        self.stretch_input.setPlaceholderText("100")
 
     def save_gpx(self):
         if self.gpx_data_3_final is None:
@@ -516,22 +517,22 @@ class MainWindow(QMainWindow):
         self.rotation = value
         self.update_final_gpx()
 
-    def update_hor_scale_from_slider(self):
-        value = self.hor_scale_slider.value()
-        self.hor_scale_input.blockSignals(True)
-        self.hor_scale_input.setText(f"{value}")
-        self.hor_scale_input.blockSignals(False)
+    def update_stretch_from_slider(self):
+        value = self.stretch_slider.value()
+        self.stretch_input.blockSignals(True)
+        self.stretch_input.setText(f"{value}")
+        self.stretch_input.blockSignals(False)
         self.hor_scale = value / 100.0
         self.update_final_gpx()
 
-    def update_hor_scale_from_input(self):
+    def update_stretch_from_input(self):
         try:
-            value = int(self.hor_scale_input.text())
+            value = int(self.stretch_input.text())
         except:
             return
-        self.hor_scale_slider.blockSignals(True)
-        self.hor_scale_slider.setValue(value)
-        self.hor_scale_slider.blockSignals(False)
+        self.stretch_slider.blockSignals(True)
+        self.stretch_slider.setValue(value)
+        self.stretch_slider.blockSignals(False)
         self.hor_scale = value / 100.0
         self.update_final_gpx()
 
