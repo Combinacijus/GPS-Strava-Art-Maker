@@ -5,7 +5,6 @@ import os
 import copy
 import math
 import folium
-import geopy.distance
 from PyQt5.QtCore import Qt, QUrl, QTimer
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (
@@ -29,20 +28,30 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GPS Strava Art Maker")
-        self.manager = SvgGpxManager()
+        self.svg_gpx_manager = SvgGpxManager()
         self.svg_paths = None
-        self.gpx_data = None
-        self.original_gpx_data = None  # store original GPX to re-scale later
+        # original_gpx_data: uniform scaling (path length + marker updates)
+
+        self.gpx_data_1_original = None
+        self.gpx_data_2_scaled_translated = None
+        self.gpx_data_3_final = None
+
         self.project_path = os.getcwd()
         self.plot_canvas = MplCanvas(self, width=5, height=4, dpi=100)
         self.map_view = QWebEngineView()
+
+        # Additional transform parameters:
+        self.rotation = 0  # degrees (applied after horizontal scaling)
+        self.hor_scale = 1.0  # horizontal scaling factor (1.0 = 100%)
+
         self.init_ui()
-        self.update_map_view(self.map_view, self.gpx_data, self.project_path)
 
         # For demonstration, try loading a default SVG.
-        self.load_svg("drawing.svg")
+        try:
+            self.load_svg("drawing.svg")
+        except Exception:
+            pass
 
-        # Start a timer to poll for marker dragend updates.
         self.markerUpdateTimer = QTimer(self)
         self.markerUpdateTimer.setInterval(500)  # every 500 ms
         self.markerUpdateTimer.timeout.connect(self.poll_marker_drag_end)
@@ -66,23 +75,21 @@ class MainWindow(QMainWindow):
         # Action buttons.
         action_layout = QHBoxLayout()
         self.reload_display_button = QPushButton("Reload Display")
-        self.reload_display_button.clicked.connect(self.reload_display)
+        self.reload_display_button.clicked.connect(self.reload_gui)
         action_layout.addWidget(self.reload_display_button)
         self.save_button = QPushButton("Save GPX")
         self.save_button.clicked.connect(self.save_gpx)
         action_layout.addWidget(self.save_button)
         main_layout.addLayout(action_layout)
 
-        # Add path length label, input box, slider, and new button.
+        # ----- Path Length Controls (existing) -----
         slider_layout = QHBoxLayout()
-        # Label for the path length inside a styled box similar to buttons.
         self.path_length_label = QLabel("Path Length (km)")
         self.path_length_label.setStyleSheet(
             "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
         slider_layout.addWidget(self.path_length_label)
 
-        # Input box for the target path length (in km).
         self.path_length_input = QLineEdit("1.00")
         self.path_length_input.setPlaceholderText("Length (km):")
         self.path_length_input.setStyleSheet(
@@ -92,11 +99,11 @@ class MainWindow(QMainWindow):
         self.path_length_input.editingFinished.connect(self.update_path_length_from_input)
         slider_layout.addWidget(self.path_length_input)
 
-        # Create the slider.
-        self.path_length_slider = QSlider(Qt.Horizontal)
+        self.exponent_scale = 1000  # exp(x/exponent_scale)
+        self.path_length_slider = QSlider(Qt.Horizontal)  # Log scale slider
         self.path_length_slider.setMinimum(0)
-        self.path_length_slider.setMaximum(300)
-        self.path_length_slider.setValue(100)  # initial value corresponding to 1 km.
+        self.path_length_slider.setMaximum(3 * self.exponent_scale)
+        self.path_length_slider.setValue(1 * self.exponent_scale)  # default corresponding to ~1 km
         self.path_length_slider.valueChanged.connect(self.update_path_length_from_slider)
         slider_layout.addWidget(self.path_length_slider)
 
@@ -109,6 +116,59 @@ class MainWindow(QMainWindow):
         slider_layout.addWidget(self.move_path_button)
 
         main_layout.addLayout(slider_layout)
+
+        # ----- New Transformation Controls -----
+        # Rotation control row
+        rotation_layout = QHBoxLayout()
+        self.rotation_label = QLabel("Rotation (deg)")
+        self.rotation_label.setStyleSheet(
+            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        )
+        rotation_layout.addWidget(self.rotation_label)
+
+        self.rotation_input = QLineEdit("0")
+        self.rotation_input.setPlaceholderText("0")
+        self.rotation_input.setStyleSheet(
+            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        )
+        self.rotation_input.setFixedWidth(100)
+        self.rotation_input.editingFinished.connect(self.update_rotation_from_input)
+        rotation_layout.addWidget(self.rotation_input)
+
+        self.rotation_slider = QSlider(Qt.Horizontal)
+        self.rotation_slider.setMinimum(-180)
+        self.rotation_slider.setMaximum(180)
+        self.rotation_slider.setValue(0)
+        self.rotation_slider.valueChanged.connect(self.update_rotation_from_slider)
+        rotation_layout.addWidget(self.rotation_slider)
+
+        main_layout.addLayout(rotation_layout)
+
+        # Horizontal scaling control row
+        hor_scale_layout = QHBoxLayout()
+        self.hor_scale_label = QLabel("Horizontal Scale (%)")
+        self.hor_scale_label.setStyleSheet(
+            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        )
+        hor_scale_layout.addWidget(self.hor_scale_label)
+
+        self.hor_scale_input = QLineEdit("100")
+        self.hor_scale_input.setPlaceholderText("100")
+        self.hor_scale_input.setStyleSheet(
+            "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
+        )
+        self.hor_scale_input.setFixedWidth(100)
+        self.hor_scale_input.editingFinished.connect(self.update_hor_scale_from_input)
+        hor_scale_layout.addWidget(self.hor_scale_input)
+
+        self.hor_scale_slider = QSlider(Qt.Horizontal)
+        self.hor_scale_slider.setMinimum(50)  # 50% = 0.5
+        self.hor_scale_slider.setMaximum(200)  # 200% = 2.0
+        self.hor_scale_slider.setValue(100)  # default 100% = 1.0
+        self.hor_scale_slider.valueChanged.connect(self.update_hor_scale_from_slider)
+        hor_scale_layout.addWidget(self.hor_scale_slider)
+
+        main_layout.addLayout(hor_scale_layout)
 
         # Panes.
         self.plot_pane = ResizablePane("Plot", self.plot_canvas, "plot")
@@ -132,53 +192,52 @@ class MainWindow(QMainWindow):
 
     def load_svg(self, file_name=None):
         if not file_name:
-            file_name, _ = QFileDialog.getOpenFileName(
-                self, "Open SVG File", self.project_path, "SVG Files (*.svg)"
-            )
+            file_name, _ = QFileDialog.getOpenFileName(self, "Open SVG File", self.project_path, "SVG Files (*.svg)")
         if file_name:
             try:
-                self.svg_paths, self.gpx_data = self.manager.process_svg_file(file_name)
-                self.original_gpx_data = copy.deepcopy(self.gpx_data)
+                self.svg_paths, self.gpx_data_1_original = self.svg_gpx_manager.process_svg_file(file_name)
+                self.gpx_data_2_scaled_translated = copy.deepcopy(self.gpx_data_1_original)
+                self.gpx_data_3_final = copy.deepcopy(self.gpx_data_1_original)
                 self.status_label.setText(f"Loaded SVG: {file_name}")
-                self.update_slider_from_gpx()  # Recalculate path length and update slider.
-                self.reload_display()
+
+                self.update_all_slider_from_gpx(self.gpx_data_1_original)
+                self.update_final_gpx()
             except Exception as e:
                 self.status_label.setText(f"Error loading SVG: {e}")
 
     def load_gpx(self, file_name=None):
         if not file_name:
-            file_name, _ = QFileDialog.getOpenFileName(
-                self, "Open GPX File", self.project_path, "GPX Files (*.gpx)"
-            )
+            file_name, _ = QFileDialog.getOpenFileName(self, "Open GPX File", self.project_path, "GPX Files (*.gpx)")
         if file_name:
             try:
-                self.gpx_data = self.manager.load_gpx(file_name)
-                self.original_gpx_data = copy.deepcopy(self.gpx_data)
+                self.gpx_data_1_original = self.svg_gpx_manager.load_gpx(file_name)
+                self.gpx_data_2_scaled_translated = copy.deepcopy(self.gpx_data_1_original)
+                self.gpx_data_3_final = copy.deepcopy(self.gpx_data_1_original)
                 self.svg_paths = None
                 self.status_label.setText(f"Loaded GPX: {file_name}")
-                self.update_slider_from_gpx()  # Recalculate path length and update slider.
-                self.reload_display()
+
+                self.update_all_slider_from_gpx(self.gpx_data_1_original)
+                self.update_final_gpx()
             except Exception as e:
                 self.status_label.setText(f"Error loading GPX: {e}")
 
-    def update_slider_from_gpx(self):
-        """Recalculate the actual path length and update the input box and slider."""
-        if self.original_gpx_data is None:
+    def update_all_slider_from_gpx(self, gpx):
+        self.rotation_slider.setValue(0)
+        self.rotation_input.setPlaceholderText("0")
+        self.hor_scale_slider.setValue(100)
+        self.hor_scale_input.setPlaceholderText("100")
+
+    def save_gpx(self):
+        if self.gpx_data_3_final is None:
+            self.status_label.setText("No GPX data to save. Load an SVG or GPX file first.")
             return
-        actual_length = self.calculate_gpx_length(self.original_gpx_data)
-        if actual_length <= 0:
-            return
-        km_val = actual_length / 1000.0
-        # Calculate the slider value from the logarithmic mapping:
-        # target_length = (10^(exponent))*1000, so exponent = log10(actual_length/1000)
-        exponent = math.log10(actual_length / 1000.0)
-        slider_value = int((exponent + 1) * 100)
-        self.path_length_input.blockSignals(True)
-        self.path_length_input.setText(f"{km_val:.2f}")
-        self.path_length_input.blockSignals(False)
-        self.path_length_slider.blockSignals(True)
-        self.path_length_slider.setValue(slider_value)
-        self.path_length_slider.blockSignals(False)
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save GPX File", self.project_path, "GPX Files (*.gpx);;All Files (*)")
+        if save_path:
+            try:
+                self.svg_gpx_manager.save_gpx(self.gpx_data_3_final, save_path)
+                self.status_label.setText(f"GPX file saved to: {save_path}")
+            except Exception as e:
+                self.status_label.setText(f"Error saving GPX: {e}")
 
     def update_map_view(self, map_view, gpx_data, project_path):
         if gpx_data is None:
@@ -197,9 +256,7 @@ class MainWindow(QMainWindow):
                 center_lon = sum(lon for lat, lon in coords) / len(coords)
                 m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
                 # (Optional) Load the draggable path plugin.
-                m.get_root().html.add_child(
-                    folium.Element('<script src="https://unpkg.com/leaflet-path-drag@0.0.8/Path.Drag.js"></script>')
-                )
+                m.get_root().html.add_child(folium.Element('<script src="https://unpkg.com/leaflet-path-drag@0.0.8/Path.Drag.js"></script>'))
                 # Convert coordinates list to JSON.
                 coords_json = json.dumps(coords)
                 # The handle is now positioned at the top edge (north) of the polyline bounds,
@@ -270,66 +327,247 @@ class MainWindow(QMainWindow):
                 </script>
                 """
                 m.get_root().html.add_child(folium.Element(script))
-        temp_file = os.path.join(project_path, "temp_map.html")
-        m.save(temp_file)
-        map_view.load(QUrl.fromLocalFile(temp_file))
 
-    def reload_display(self):
-        if self.gpx_data is None:
+        # temp_file = os.path.join(project_path, "temp_map.html")
+        # m.save(temp_file)
+        # map_view.load(QUrl.fromLocalFile(temp_file))
+
+        map_html = m.get_root().render()
+        map_view.setHtml(map_html)
+
+    def reload_gui(self):
+        if self.gpx_data_3_final is None:
             self.status_label.setText("No GPX data to display. Load an SVG or GPX file first.")
             return
+
         self.plot_canvas.figure.clf()
+
         if self.svg_paths is not None:
             ax1 = self.plot_canvas.figure.add_subplot(121)
             ax2 = self.plot_canvas.figure.add_subplot(122)
-            self.manager.plot_svg(self.svg_paths, ax1)
-            self.manager.plot_gpx(self.gpx_data, ax2)
+            self.svg_gpx_manager.plot_svg(self.svg_paths, ax1)
+            self.svg_gpx_manager.plot_gpx(self.gpx_data_3_final, ax2)
             ax1.set_title("SVG Path")
             ax2.set_title("GPX Path")
             ax1.set_aspect("equal", "box")
             ax2.set_aspect("equal", "box")
         else:
             ax = self.plot_canvas.figure.add_subplot(111)
-            self.manager.plot_gpx(self.gpx_data, ax)
+            self.svg_gpx_manager.plot_gpx(self.gpx_data_3_final, ax)
             ax.set_title("GPX Path")
             ax.set_aspect("equal", "box")
+
         self.plot_canvas.figure.tight_layout()
         self.plot_canvas.draw()
-        self.update_map_view(self.map_view, self.gpx_data, self.project_path)
 
-    def save_gpx(self):
-        if self.gpx_data is None:
-            self.status_label.setText("No GPX data to save. Load an SVG or GPX file first.")
-            return
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save GPX File", self.project_path, "GPX Files (*.gpx);;All Files (*)"
-        )
-        if save_path:
-            try:
-                with open(save_path, "w") as f:
-                    f.write(self.gpx_data.to_xml())
-                self.status_label.setText(f"GPX file saved to: {save_path}")
-            except Exception as e:
-                self.status_label.setText(f"Error saving GPX: {e}")
-
-    def calculate_gpx_length(self, gpx):
-        """Calculate the total length of the GPX path in meters."""
-        total_length = 0.0
-        for track in gpx.tracks:
-            for segment in track.segments:
-                pts = segment.points
-                for i in range(1, len(pts)):
-                    p1 = pts[i - 1]
-                    p2 = pts[i]
-                    total_length += geopy.distance.distance(
-                        (p1.latitude, p1.longitude), (p2.latitude, p2.longitude)
-                    ).meters
-        return total_length
+        self.update_map_view(self.map_view, self.gpx_data_3_final, self.project_path)
 
     def scale_gpx_path(self, gpx, scale_factor):
-        """
-        Return a new GPX object with all points scaled relative to the centroid.
-        Resizing uniformly scales the path length by the same factor.
+        center_lat, center_lon = self.svg_gpx_manager.get_path_center_lat_lon(gpx)
+        if not center_lat or not center_lon:
+            return gpx
+
+        gpx_scaled = self.svg_gpx_manager.scale_gpx_around_point(gpx, center_lat, center_lon, scale_factor)
+
+        return gpx_scaled
+
+    def translate_gpx_path(self, gpx, lat_offset, lng_offset):
+        new_gpx = copy.deepcopy(gpx)
+        for track in new_gpx.tracks:
+            for segment in track.segments:
+                for p in segment.points:
+                    p.latitude += lat_offset
+                    p.longitude += lng_offset
+        return new_gpx
+
+    def gpx_transform_and_rotate(self, gpx):
+        new_gpx = copy.deepcopy(gpx)
+
+        lat_sum, lon_sum, count = 0.0, 0.0, 0
+        for track in new_gpx.tracks:
+            for segment in track.segments:
+                for p in segment.points:
+                    lat_sum += p.latitude
+                    lon_sum += p.longitude
+                    count += 1
+
+        if count == 0:
+            return new_gpx
+
+        center_lat = lat_sum / count
+        center_lon = lon_sum / count
+
+        # Apply horizontal scaling (scale only the longitude relative to center)
+        for track in new_gpx.tracks:
+            for segment in track.segments:
+                for p in segment.points:
+                    p.longitude = center_lon + self.hor_scale * (p.longitude - center_lon)
+
+        # Apply rotation around the centroid.
+        angle_rad = -math.radians(self.rotation)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        for track in new_gpx.tracks:
+            for segment in track.segments:
+                for p in segment.points:
+                    dlat = p.latitude - center_lat
+                    dlon = p.longitude - center_lon
+                    new_dlon = dlon * cos_a - dlat * sin_a
+                    new_dlat = dlon * sin_a + dlat * cos_a
+                    p.longitude = center_lon + new_dlon
+                    p.latitude = center_lat + new_dlat
+
+        return new_gpx
+
+    def update_final_gpx(self):
+        if self.gpx_data_2_scaled_translated is None:
+            return
+
+        gpx_data_transformed = self.gpx_transform_and_rotate(self.gpx_data_2_scaled_translated)
+        self.gpx_data_3_final = self.fix_lat_lon_scaling(gpx_data_transformed)
+
+        self.reload_gui()
+
+    def len_km_to_slider(self, val_km):
+        exponent = math.log10(val_km)
+        return int((exponent + 1) * self.exponent_scale)
+
+    def len_slider_to_km(self, slider_value):
+        exponent = slider_value / self.exponent_scale - 1
+        return 10**exponent
+
+    def resize_to_target_path_length(self, target_length_km):
+        """Helper method to update the path length, scale factor, and GPX data."""
+        if target_length_km <= 0 or self.gpx_data_1_original is None:
+            return
+
+        original_length_km = self.svg_gpx_manager.calculate_gpx_length_km(self.gpx_data_1_original)
+        if original_length_km == 0:
+            return
+
+        scale_factor = target_length_km / original_length_km
+        self.gpx_data_2_scaled_translated = self.scale_gpx_path(self.gpx_data_1_original, scale_factor)
+        self.update_final_gpx()
+
+    def update_path_length_from_slider(self):
+        slider_value = self.path_length_slider.value()
+
+        target_length_km = self.len_slider_to_km(slider_value)
+
+        self.path_length_input.blockSignals(True)
+        self.path_length_input.setText(f"{target_length_km:.2f}")
+        self.path_length_input.blockSignals(False)
+
+        self.resize_to_target_path_length(target_length_km)
+
+    def update_path_length_from_input(self):
+        text = self.path_length_input.text()
+        try:
+            target_length_km = float(text)
+        except ValueError:
+            return
+
+        print(f"target_length_km {target_length_km}, slider {self.len_km_to_slider(target_length_km)}")
+
+        self.path_length_slider.blockSignals(True)
+        self.path_length_slider.setValue(self.len_km_to_slider(target_length_km))
+        self.path_length_slider.blockSignals(False)
+
+        self.resize_to_target_path_length(target_length_km)
+
+    def update_rotation_from_slider(self):
+        value = self.rotation_slider.value()
+        self.rotation_input.blockSignals(True)
+        self.rotation_input.setText(str(value))
+        self.rotation_input.blockSignals(False)
+        self.rotation = value
+        self.update_final_gpx()
+
+    def update_rotation_from_input(self):
+        try:
+            value = int(self.rotation_input.text())
+        except:
+            return
+        self.rotation_slider.blockSignals(True)
+        self.rotation_slider.setValue(value)
+        self.rotation_slider.blockSignals(False)
+        self.rotation = value
+        self.update_final_gpx()
+
+    def update_hor_scale_from_slider(self):
+        value = self.hor_scale_slider.value()
+        self.hor_scale_input.blockSignals(True)
+        self.hor_scale_input.setText(f"{value}")
+        self.hor_scale_input.blockSignals(False)
+        self.hor_scale = value / 100.0
+        self.update_final_gpx()
+
+    def update_hor_scale_from_input(self):
+        try:
+            value = int(self.hor_scale_input.text())
+        except:
+            return
+        self.hor_scale_slider.blockSignals(True)
+        self.hor_scale_slider.setValue(value)
+        self.hor_scale_slider.blockSignals(False)
+        self.hor_scale = value / 100.0
+        self.update_final_gpx()
+
+    def move_path_to_center(self):
+        self.map_view.page().runJavaScript("map.getCenter()", self.move_path_to_center_js_cb)
+
+    def move_path_to_center_js_cb(self, map_center):
+        if not map_center:
+            return
+
+        center_lat, center_lon = self.svg_gpx_manager.get_path_center_lat_lon(self.gpx_data_2_scaled_translated)
+
+        lat_offset = map_center["lat"] - center_lat
+        lon_offset = map_center["lng"] - center_lon
+
+        self.gpx_data_2_scaled_translated = self.translate_gpx_path(self.gpx_data_2_scaled_translated, lat_offset, lon_offset)
+
+        self.update_final_gpx()
+
+    def poll_marker_drag_end(self):
+        self.map_view.page().runJavaScript("window.markerDragEnded", self.handle_marker_drag_end)
+
+    def handle_marker_drag_end(self, dragEnded):
+        if dragEnded:
+            self.map_view.page().runJavaScript("JSON.stringify(window.gpxPolyline.getLatLngs())", self.translate_gpx_with_marker)
+            self.map_view.page().runJavaScript("window.markerDragEnded = false;")
+
+    def translate_gpx_with_marker(self, js_result):
+        try:
+            coords_list = json.loads(js_result)
+        except Exception as e:
+            coords_list = None
+            print("Error parsing JS result in _update_gpx_from_marker:", e)
+
+        gpx_from_map = copy.deepcopy(self.gpx_data_2_scaled_translated)
+        if coords_list is not None:
+            i = 0
+            for track in gpx_from_map.tracks:
+                for segment in track.segments:
+                    for p in segment.points:
+                        if i < len(coords_list):
+                            p.latitude = coords_list[i]["lat"]
+                            p.longitude = coords_list[i]["lng"]
+                            i += 1
+
+            center_lat_prev, center_lon_prev = self.svg_gpx_manager.get_path_center_lat_lon(self.gpx_data_2_scaled_translated)
+            center_lat_new, center_lon_new = self.svg_gpx_manager.get_path_center_lat_lon(gpx_from_map)
+
+            lat_offset = center_lat_new - center_lat_prev
+            lon_offset = center_lon_new - center_lon_prev
+
+            self.gpx_data_2_scaled_translated = self.translate_gpx_path(self.gpx_data_2_scaled_translated, lat_offset, lon_offset)
+
+            self.update_final_gpx()
+
+    def fix_lat_lon_scaling(self, gpx):
+        """Adjust longitudes so that degrees produce equal distances as latitudes.
+        This uses the average latitude to compute the correction factor.
         """
         new_gpx = copy.deepcopy(gpx)
         lat_sum, lon_sum, count = 0.0, 0.0, 0
@@ -341,155 +579,16 @@ class MainWindow(QMainWindow):
                     count += 1
         if count == 0:
             return new_gpx
-        center_lat = lat_sum / count
+        avg_lat = lat_sum / count
+        # At avg_lat, 1 degree of longitude is ~cos(avg_lat) times 1 degree of latitude.
+        factor = 1 / math.cos(math.radians(avg_lat))
+        # Adjust longitudes relative to their average.
         center_lon = lon_sum / count
         for track in new_gpx.tracks:
             for segment in track.segments:
                 for p in segment.points:
-                    p.latitude = center_lat + scale_factor * (p.latitude - center_lat)
-                    p.longitude = center_lon + scale_factor * (p.longitude - center_lon)
+                    p.longitude = center_lon + (p.longitude - center_lon) * factor
         return new_gpx
-
-    def translate_gpx_path(self, gpx, lat_offset, lng_offset):
-        """Return a new GPX object with all points translated by the given offsets."""
-        new_gpx = copy.deepcopy(gpx)
-        for track in new_gpx.tracks:
-            for segment in track.segments:
-                for p in segment.points:
-                    p.latitude += lat_offset
-                    p.longitude += lng_offset
-        return new_gpx
-
-    def format_distance(self, meters):
-        """Format the distance in meters as a human‑readable string."""
-        if meters >= 1000:
-            return f"{meters/1000:.2f} km"
-        else:
-            return f"{meters:.0f} m"
-
-    def update_path_length_from_slider(self):
-        slider_value = self.path_length_slider.value()
-        exponent = slider_value / 100 - 1
-        target_length = (10 ** exponent) * 1000  # in meters
-        km_val = target_length / 1000.0
-        self.path_length_input.blockSignals(True)
-        self.path_length_input.setText(f"{km_val:.2f}")
-        self.path_length_input.blockSignals(False)
-        if self.original_gpx_data is None:
-            return
-        original_length = self.calculate_gpx_length(self.original_gpx_data)
-        if original_length == 0:
-            return
-        scale_factor = target_length / original_length
-        self.gpx_data = self.scale_gpx_path(self.original_gpx_data, scale_factor)
-        self.reload_display()
-
-    def update_path_length_from_input(self):
-        text = self.path_length_input.text()
-        try:
-            km_val = float(text)
-        except ValueError:
-            return
-        target_length = km_val * 1000.0
-        if target_length <= 0:
-            return
-        exponent = math.log10(target_length / 1000.0)
-        slider_value = int((exponent + 1) * 100)
-        self.path_length_slider.blockSignals(True)
-        self.path_length_slider.setValue(slider_value)
-        self.path_length_slider.blockSignals(False)
-        if self.original_gpx_data is None:
-            return
-        original_length = self.calculate_gpx_length(self.original_gpx_data)
-        if original_length == 0:
-            return
-        scale_factor = target_length / original_length
-        self.gpx_data = self.scale_gpx_path(self.original_gpx_data, scale_factor)
-        self.reload_display()
-
-    def move_path_to_center(self):
-        # First, update the gpx_data from the JS polyline.
-        self.map_view.page().runJavaScript("JSON.stringify(window.gpxPolyline.getLatLngs())", self._move_path_to_center_after_js)
-
-    def _move_path_to_center_after_js(self, js_result):
-        print("_move_path_to_center_after_js")
-        try:
-            coords_list = json.loads(js_result)
-        except Exception as e:
-            coords_list = None
-            print("Error parsing JS result:", e)
-        if coords_list is not None:
-            i = 0
-            for track in self.gpx_data.tracks:
-                for segment in track.segments:
-                    for p in segment.points:
-                        if i < len(coords_list):
-                            p.latitude = coords_list[i]["lat"]
-                            p.longitude = coords_list[i]["lng"]
-                            i += 1
-            print("After move button, GPX coordinates:")
-            for track in self.gpx_data.tracks:
-                for segment in track.segments:
-                    for p in segment.points:
-                        print(f"({p.latitude}, {p.longitude})")
-        self.map_view.page().runJavaScript("map.getCenter()", self.handle_map_center)
-
-    def handle_map_center(self, center):
-        if not center:
-            return
-        coords = []
-        for track in self.gpx_data.tracks:
-            for segment in track.segments:
-                for p in segment.points:
-                    coords.append([p.latitude, p.longitude])
-        if not coords:
-            return
-        poly_center_lat = sum(c[0] for c in coords) / len(coords)
-        poly_center_lng = sum(c[1] for c in coords) / len(coords)
-        lat_offset = center["lat"] - poly_center_lat
-        lng_offset = center["lng"] - poly_center_lng
-        self.gpx_data = self.translate_gpx_path(self.gpx_data, lat_offset, lng_offset)
-        self.original_gpx_data = copy.deepcopy(self.gpx_data)
-        print("handle_map_center center, lat_offset, lng_offset", center, lat_offset, lng_offset)
-        print("After move to center, updated GPX coordinates:")
-        for track in self.gpx_data.tracks:
-            for segment in track.segments:
-                for p in segment.points:
-                    print(f"({p.latitude}, {p.longitude})")
-        self.reload_display()
-
-    def poll_marker_drag_end(self):
-        # Poll for the global flag set by the JS dragend event.
-        self.map_view.page().runJavaScript("window.markerDragEnded", self._handle_marker_drag_end)
-
-    def _handle_marker_drag_end(self, dragEnded):
-        if dragEnded:
-            # If the marker drag has ended, update GPX data from the JS polyline.
-            self.map_view.page().runJavaScript("JSON.stringify(window.gpxPolyline.getLatLngs())", self._update_gpx_from_marker)
-            # Reset the flag in JS.
-            self.map_view.page().runJavaScript("window.markerDragEnded = false;")
-
-    def _update_gpx_from_marker(self, js_result):
-        print("_update_gpx_from_marker")
-        try:
-            coords_list = json.loads(js_result)
-        except Exception as e:
-            coords_list = None
-            print("Error parsing JS result in _update_gpx_from_marker:", e)
-        if coords_list is not None:
-            i = 0
-            for track in self.gpx_data.tracks:
-                for segment in track.segments:
-                    for p in segment.points:
-                        if i < len(coords_list):
-                            p.latitude = coords_list[i]["lat"]
-                            p.longitude = coords_list[i]["lng"]
-                            i += 1
-            print("After marker drag, updated GPX coordinates:")
-            for track in self.gpx_data.tracks:
-                for segment in track.segments:
-                    for p in segment.points:
-                        print(f"({p.latitude}, {p.longitude})")
 
 
 def main():

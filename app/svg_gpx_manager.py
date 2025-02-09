@@ -1,11 +1,13 @@
 # svg_gpx_manager.py
 import os
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import gpxpy
 import gpxpy.gpx
 from svgpathtools import svg2paths, Line, CubicBezier, QuadraticBezier
 from geopy.distance import geodesic
+import geopy.distance
 
 
 class SvgGpxManager:
@@ -52,26 +54,26 @@ class SvgGpxManager:
             gpx_segment.points.append(gpxpy.gpx.GPXTrackPoint(-y, x))
 
     def calculate_cubic_bezier(self, seg, t_vals):
-        x_vals = ((1 - t_vals) ** 3 * seg.start.real +
-                  3 * (1 - t_vals) ** 2 * t_vals * seg.control1.real +
-                  3 * (1 - t_vals) * t_vals ** 2 * seg.control2.real +
-                  t_vals ** 3 * seg.end.real)
-        y_vals = ((1 - t_vals) ** 3 * seg.start.imag +
-                  3 * (1 - t_vals) ** 2 * t_vals * seg.control1.imag +
-                  3 * (1 - t_vals) * t_vals ** 2 * seg.control2.imag +
-                  t_vals ** 3 * seg.end.imag)
+        x_vals = (
+            (1 - t_vals) ** 3 * seg.start.real
+            + 3 * (1 - t_vals) ** 2 * t_vals * seg.control1.real
+            + 3 * (1 - t_vals) * t_vals**2 * seg.control2.real
+            + t_vals**3 * seg.end.real
+        )
+        y_vals = (
+            (1 - t_vals) ** 3 * seg.start.imag
+            + 3 * (1 - t_vals) ** 2 * t_vals * seg.control1.imag
+            + 3 * (1 - t_vals) * t_vals**2 * seg.control2.imag
+            + t_vals**3 * seg.end.imag
+        )
         return x_vals, y_vals
 
     def calculate_quadratic_bezier(self, seg, t_vals):
-        x_vals = ((1 - t_vals) ** 2 * seg.start.real +
-                  2 * (1 - t_vals) * t_vals * seg.control.real +
-                  t_vals ** 2 * seg.end.real)
-        y_vals = ((1 - t_vals) ** 2 * seg.start.imag +
-                  2 * (1 - t_vals) * t_vals * seg.control.imag +
-                  t_vals ** 2 * seg.end.imag)
+        x_vals = (1 - t_vals) ** 2 * seg.start.real + 2 * (1 - t_vals) * t_vals * seg.control.real + t_vals**2 * seg.end.real
+        y_vals = (1 - t_vals) ** 2 * seg.start.imag + 2 * (1 - t_vals) * t_vals * seg.control.imag + t_vals**2 * seg.end.imag
         return x_vals, y_vals
 
-    def scale_gpx(self, gpx):
+    def scale_gpx_initial(self, gpx):
         scale_down_factor = 0.000001  # Adjust coordinate range
         latitudes = [p.latitude for track in gpx.tracks for seg in track.segments for p in seg.points]
         longitudes = [p.longitude for track in gpx.tracks for seg in track.segments for p in seg.points]
@@ -120,7 +122,7 @@ class SvgGpxManager:
     def process_svg_file(self, file_name):
         svg_paths = self.load_svg(file_name)
         gpx = self.convert_svg_to_gpx(svg_paths)
-        gpx = self.scale_gpx(gpx)
+        gpx = self.scale_gpx_initial(gpx)
         gpx = self.center_gpx_at(gpx)
         return svg_paths, gpx
 
@@ -180,3 +182,42 @@ class SvgGpxManager:
                 ax.plot(lons, lats, "ro-", lw=2)
         ax.set_xlabel("Longitude")
         ax.set_ylabel("Latitude")
+
+    def calculate_gpx_length_km(self, gpx):
+        total_length = 0.0
+        for track in gpx.tracks:
+            for segment in track.segments:
+                pts = segment.points
+                for i in range(1, len(pts)):
+                    p1 = pts[i - 1]
+                    p2 = pts[i]
+                    total_length += geopy.distance.distance((p1.latitude, p1.longitude), (p2.latitude, p2.longitude)).kilometers
+        return total_length
+
+    def save_gpx(self, gpx_data, save_path):
+        with open(save_path, "w") as f:
+            f.write(gpx_data.to_xml())
+
+    def get_path_center_lat_lon(self, gpx):
+        latitudes = [p.latitude for track in gpx.tracks for seg in track.segments for p in seg.points]
+        longitudes = [p.longitude for track in gpx.tracks for seg in track.segments for p in seg.points]
+
+        if not latitudes:
+            return (None,)
+        None
+
+        center_lat = np.mean(latitudes)
+        center_lon = np.mean(longitudes)
+
+        return center_lat, center_lon
+
+    def scale_gpx_around_point(self, gpx, center_lat, center_lon, scale_factor):
+        """Scale all points in tracks around the given center coordinates."""
+        new_gpx = copy.deepcopy(gpx)
+        for track in new_gpx.tracks:
+            for segment in track.segments:
+                for p in segment.points:
+                    p.latitude = center_lat + scale_factor * (p.latitude - center_lat)
+                    p.longitude = center_lon + scale_factor * (p.longitude - center_lon)
+
+        return new_gpx
