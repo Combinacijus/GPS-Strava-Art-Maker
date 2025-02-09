@@ -1,1 +1,0 @@
-pytinstaller --hidden-import six --onefile gps_strava_art_maker.py
