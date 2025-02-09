@@ -5,7 +5,7 @@ import os
 import copy
 import math
 import folium
-from PyQt5.QtCore import Qt, QUrl, QTimer
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (
     QApplication,
@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self.path_length_label.setStyleSheet(
             "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
+        self.path_length_label.setFixedWidth(250)
         slider_layout.addWidget(self.path_length_label)
 
         self.path_length_input = QLineEdit("1.00")
@@ -124,6 +125,7 @@ class MainWindow(QMainWindow):
         self.rotation_label.setStyleSheet(
             "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
+        self.rotation_label.setFixedWidth(250)
         rotation_layout.addWidget(self.rotation_label)
 
         self.rotation_input = QLineEdit("0")
@@ -150,6 +152,7 @@ class MainWindow(QMainWindow):
         self.hor_scale_label.setStyleSheet(
             "font-size: 20px; padding: 12px 20px; background-color: #007ACC; color: white; border: none; border-radius: 6px;"
         )
+        self.hor_scale_label.setFixedWidth(250)
         hor_scale_layout.addWidget(self.hor_scale_label)
 
         self.hor_scale_input = QLineEdit("100")
@@ -195,7 +198,7 @@ class MainWindow(QMainWindow):
             file_name, _ = QFileDialog.getOpenFileName(self, "Open SVG File", self.project_path, "SVG Files (*.svg)")
         if file_name:
             try:
-                self.svg_paths, self.gpx_data_1_original = self.svg_gpx_manager.process_svg_file(file_name)
+                self.svg_paths, self.gpx_data_1_original = self.svg_gpx_manager.process_svg_file(file_name)                
                 self.gpx_data_2_scaled_translated = copy.deepcopy(self.gpx_data_1_original)
                 self.gpx_data_3_final = copy.deepcopy(self.gpx_data_1_original)
                 self.status_label.setText(f"Loaded SVG: {file_name}")
@@ -211,6 +214,9 @@ class MainWindow(QMainWindow):
         if file_name:
             try:
                 self.gpx_data_1_original = self.svg_gpx_manager.load_gpx(file_name)
+                
+                self.gpx_data_1_original = self.fix_lat_lon_scaling(self.gpx_data_1_original, reversed=True)  # So that after fix it won't transform
+                
                 self.gpx_data_2_scaled_translated = copy.deepcopy(self.gpx_data_1_original)
                 self.gpx_data_3_final = copy.deepcopy(self.gpx_data_1_original)
                 self.svg_paths = None
@@ -249,18 +255,11 @@ class MainWindow(QMainWindow):
         
         if not hasattr(self, 'map_initialized') or not self.map_initialized:
             # Initialize the map once with default settings and JS functions
-            if not coords:
-                default_lat, default_lon = 54.9048217, 23.9592468
-                m = folium.Map(location=[default_lat, default_lon], zoom_start=14)
-            else:
-                center_lat = sum(lat for lat, lon in coords) / len(coords)
-                center_lon = sum(lon for lat, lon in coords) / len(coords)
-                m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
-            
+            m = folium.Map(location=[54.9048217, 23.9592468], zoom_start=14)  # Default view
             m.get_root().html.add_child(folium.Element(
                 '<script src="https://unpkg.com/leaflet-path-drag@0.0.8/Path.Drag.js"></script>'
             ))
-            
+
             coords_json = json.dumps(coords)
             script = f"""
             <script>
@@ -286,18 +285,31 @@ class MainWindow(QMainWindow):
                 var handlePos = L.latLng(bounds.getNorth(), (bounds.getWest() + bounds.getEast()) / 2);
                 window.handle = L.marker(handlePos, {{draggable: true}}).addTo(map);
                 
+                // Auto-zoom to path with padding if coordinates exist
+                if({coords_json}.length > 0) {{
+                    map.fitBounds(bounds.pad(0.3));  // Added padding
+                }}
+                
                 // Define update function
                 window.updateGPX = function(newCoords) {{
                     gpxPolyline.setLatLngs(newCoords);
                     rect.setBounds(gpxPolyline.getBounds());
                     var newBounds = gpxPolyline.getBounds();
+                    
+                    // Update handle position
                     var newHandlePos = L.latLng(
                         newBounds.getNorth(),
                         (newBounds.getWest() + newBounds.getEast()) / 2
                     );
                     handle.setLatLng(newHandlePos);
+                    
+                    // Auto-zoom to updated path with padding
+                    if(newCoords.length > 0) {{
+                        map.fitBounds(newBounds.pad(0.3));  // Added padding
+                    }}
                 }};
                 
+                // Rest of the script remains unchanged
                 // Drag handlers (initial setup)
                 var handleStartPos;
                 var originalCoords;
@@ -332,11 +344,15 @@ class MainWindow(QMainWindow):
             map_view.setHtml(m.get_root().render())
             self.map_initialized = True
         else:
-            # Update existing elements via JavaScript
+            # Update existing elements via JavaScript with auto-zoom
             coords_json = json.dumps(coords)
             js_code = f"""
             if (typeof window.updateGPX === 'function') {{
                 window.updateGPX({coords_json});
+                // Handle empty coordinates case
+                if({len(coords)} === 0) {{
+                    map.setView([54.9048217, 23.9592468], 14);
+                }}
             }}
             """
             map_view.page().runJavaScript(js_code)
@@ -447,12 +463,12 @@ class MainWindow(QMainWindow):
         if target_length_km <= 0 or self.gpx_data_1_original is None:
             return
 
-        original_length_km = self.svg_gpx_manager.calculate_gpx_length_km(self.gpx_data_1_original)
+        original_length_km = self.svg_gpx_manager.calculate_gpx_length_km(self.gpx_data_2_scaled_translated)
         if original_length_km == 0:
             return
 
         scale_factor = target_length_km / original_length_km
-        self.gpx_data_2_scaled_translated = self.scale_gpx_path(self.gpx_data_1_original, scale_factor)
+        self.gpx_data_2_scaled_translated = self.scale_gpx_path(self.gpx_data_2_scaled_translated, scale_factor)
         self.update_final_gpx()
 
     def update_path_length_from_slider(self):
@@ -571,29 +587,38 @@ class MainWindow(QMainWindow):
 
             self.update_final_gpx()
 
-    def fix_lat_lon_scaling(self, gpx):
-        """Adjust longitudes so that degrees produce equal distances as latitudes.
+    def fix_lat_lon_scaling(self, gpx, reversed=False):
+        """Adjust or reverse longitude scaling so that degrees produce equal distances as latitudes.
+        
+        If reversed=True, it reverses the transformation by scaling longitudes back.
         This uses the average latitude to compute the correction factor.
         """
         new_gpx = copy.deepcopy(gpx)
         lat_sum, lon_sum, count = 0.0, 0.0, 0
+
         for track in new_gpx.tracks:
             for segment in track.segments:
                 for p in segment.points:
                     lat_sum += p.latitude
                     lon_sum += p.longitude
                     count += 1
+
         if count == 0:
             return new_gpx
+
         avg_lat = lat_sum / count
-        # At avg_lat, 1 degree of longitude is ~cos(avg_lat) times 1 degree of latitude.
         factor = 1 / math.cos(math.radians(avg_lat))
-        # Adjust longitudes relative to their average.
+        
+        # If reversed, invert the scaling factor
+        factor = 1 / factor if reversed else factor
+
         center_lon = lon_sum / count
+
         for track in new_gpx.tracks:
             for segment in track.segments:
                 for p in segment.points:
                     p.longitude = center_lon + (p.longitude - center_lon) * factor
+
         return new_gpx
 
 

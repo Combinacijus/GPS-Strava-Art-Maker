@@ -2,3 +2,6 @@
 *.gpx
 *.pyc
 *.html
+build/gps_strava_art_maker/*
+dist/*
+gps_strava_art_maker.spec
