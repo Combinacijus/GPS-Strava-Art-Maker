@@ -1,2 +1,4 @@
 *.svg
 *.gpx
+*.pyc
+*.html

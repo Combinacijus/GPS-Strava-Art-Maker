@@ -1,0 +1,6 @@
+numpy
+matplotlib
+gpxpy
+PyQt5
+svgpathtools
+geopy
