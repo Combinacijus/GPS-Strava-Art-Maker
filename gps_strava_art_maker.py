@@ -240,100 +240,106 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(f"Error saving GPX: {e}")
 
     def update_map_view(self, map_view, gpx_data, project_path):
-        if gpx_data is None:
-            default_lat, default_lon = 54.9048217, 23.9592468
-            m = folium.Map(location=[default_lat, default_lon], zoom_start=14)
-        else:
-            coords = []
+        coords = []
+        if gpx_data is not None:
             for track in gpx_data.tracks:
                 for segment in track.segments:
                     for point in segment.points:
                         coords.append([point.latitude, point.longitude])
+        
+        if not hasattr(self, 'map_initialized') or not self.map_initialized:
+            # Initialize the map once with default settings and JS functions
             if not coords:
-                m = folium.Map(location=[54.9048217, 23.9592468], zoom_start=14)
+                default_lat, default_lon = 54.9048217, 23.9592468
+                m = folium.Map(location=[default_lat, default_lon], zoom_start=14)
             else:
                 center_lat = sum(lat for lat, lon in coords) / len(coords)
                 center_lon = sum(lon for lat, lon in coords) / len(coords)
                 m = folium.Map(location=[center_lat, center_lon], zoom_start=16)
-                # (Optional) Load the draggable path plugin.
-                m.get_root().html.add_child(folium.Element('<script src="https://unpkg.com/leaflet-path-drag@0.0.8/Path.Drag.js"></script>'))
-                # Convert coordinates list to JSON.
-                coords_json = json.dumps(coords)
-                # The handle is now positioned at the top edge (north) of the polyline bounds,
-                # horizontally centered.
-                script = f"""
-                <script>
-                document.addEventListener("DOMContentLoaded", function() {{
-                    var map = {m.get_name()};
-                    window.map = map;  // Expose map globally so that other JS calls can use it.
-                    var coords = {coords_json};
-                    // Create the polyline.
-                    var gpxPolyline = L.polyline(coords, {{
-                        color: 'red',
-                        weight: 2.5,
-                        opacity: 1
-                    }}).addTo(map);
-  
-                    // Draw a bounding rectangle around the polyline.
-                    var rect = L.rectangle(gpxPolyline.getBounds(), {{
-                        color: 'blue',
-                        weight: 1,
-                        dashArray: '5,5',
-                        fillOpacity: 0.0
-                    }}).addTo(map);
-  
-                    // Compute handle position: horizontally centered, top (north) of bounds.
-                    var bounds = gpxPolyline.getBounds();
-                    var handlePos = L.latLng(bounds.getNorth(), (bounds.getWest() + bounds.getEast()) / 2);
-                    var handle = L.marker(handlePos, {{
-                        draggable: true
-                    }}).addTo(map);
-  
-                    // Expose the polyline globally so Python can fetch its coordinates.
-                    window.gpxPolyline = gpxPolyline;
-  
-                    // Reset marker drag flag.
-                    window.markerDragEnded = false;
-  
-                    var handleStartPos;
-                    var originalCoords;
-  
-                    handle.on('dragstart', function(e) {{
-                        handleStartPos = e.target.getLatLng();
-                        originalCoords = gpxPolyline.getLatLngs().map(function(latlng) {{
-                            return [latlng.lat, latlng.lng];
-                        }});
-                    }});
-  
-                    handle.on('drag', function(e) {{
-                        var newPos = e.target.getLatLng();
-                        var latOffset = newPos.lat - handleStartPos.lat;
-                        var lngOffset = newPos.lng - handleStartPos.lng;
-                        var newCoords = originalCoords.map(function(coord) {{
-                            return [coord[0] + latOffset, coord[1] + lngOffset];
-                        }});
-                        gpxPolyline.setLatLngs(newCoords);
-                        rect.setBounds(gpxPolyline.getBounds());
-                    }});
-  
-                    handle.on('dragend', function(e) {{
-                        // Reposition handle to remain horizontally centered at the top edge.
-                        var newBounds = gpxPolyline.getBounds();
-                        var newHandlePos = L.latLng(newBounds.getNorth(), (newBounds.getWest() + newBounds.getEast()) / 2);
-                        handle.setLatLng(newHandlePos);
-                        window.markerDragEnded = true;  // set flag so Python can update GPX data
-                    }});
+            
+            m.get_root().html.add_child(folium.Element(
+                '<script src="https://unpkg.com/leaflet-path-drag@0.0.8/Path.Drag.js"></script>'
+            ))
+            
+            coords_json = json.dumps(coords)
+            script = f"""
+            <script>
+            document.addEventListener("DOMContentLoaded", function() {{
+                var map = {m.get_name()};
+                window.map = map;
+                
+                // Initialize map elements
+                window.gpxPolyline = L.polyline({coords_json}, {{
+                    color: 'red',
+                    weight: 2.5,
+                    opacity: 1
+                }}).addTo(map);
+                
+                window.rect = L.rectangle(gpxPolyline.getBounds(), {{
+                    color: 'blue',
+                    weight: 1,
+                    dashArray: '5,5',
+                    fillOpacity: 0.0
+                }}).addTo(map);
+                
+                var bounds = gpxPolyline.getBounds();
+                var handlePos = L.latLng(bounds.getNorth(), (bounds.getWest() + bounds.getEast()) / 2);
+                window.handle = L.marker(handlePos, {{draggable: true}}).addTo(map);
+                
+                // Define update function
+                window.updateGPX = function(newCoords) {{
+                    gpxPolyline.setLatLngs(newCoords);
+                    rect.setBounds(gpxPolyline.getBounds());
+                    var newBounds = gpxPolyline.getBounds();
+                    var newHandlePos = L.latLng(
+                        newBounds.getNorth(),
+                        (newBounds.getWest() + newBounds.getEast()) / 2
+                    );
+                    handle.setLatLng(newHandlePos);
+                }};
+                
+                // Drag handlers (initial setup)
+                var handleStartPos;
+                var originalCoords;
+                
+                handle.on('dragstart', function(e) {{
+                    handleStartPos = e.target.getLatLng();
+                    originalCoords = gpxPolyline.getLatLngs().map(l => [l.lat, l.lng]);
                 }});
-                </script>
-                """
-                m.get_root().html.add_child(folium.Element(script))
-
-        # temp_file = os.path.join(project_path, "temp_map.html")
-        # m.save(temp_file)
-        # map_view.load(QUrl.fromLocalFile(temp_file))
-
-        map_html = m.get_root().render()
-        map_view.setHtml(map_html)
+                
+                handle.on('drag', function(e) {{
+                    var newPos = e.target.getLatLng();
+                    var latOffset = newPos.lat - handleStartPos.lat;
+                    var lngOffset = newPos.lng - handleStartPos.lng;
+                    var newCoords = originalCoords.map(c => [c[0] + latOffset, c[1] + lngOffset]);
+                    gpxPolyline.setLatLngs(newCoords);
+                    rect.setBounds(gpxPolyline.getBounds());
+                }});
+                
+                handle.on('dragend', function(e) {{
+                    var newBounds = gpxPolyline.getBounds();
+                    var newHandlePos = L.latLng(
+                        newBounds.getNorth(),
+                        (newBounds.getWest() + newBounds.getEast()) / 2
+                    );
+                    handle.setLatLng(newHandlePos);
+                    window.markerDragEnded = true;
+                }});
+            }});
+            </script>
+            """
+            m.get_root().html.add_child(folium.Element(script))
+            map_view.setHtml(m.get_root().render())
+            self.map_initialized = True
+        else:
+            # Update existing elements via JavaScript
+            coords_json = json.dumps(coords)
+            js_code = f"""
+            if (typeof window.updateGPX === 'function') {{
+                window.updateGPX({coords_json});
+            }}
+            """
+            map_view.page().runJavaScript(js_code)
 
     def reload_gui(self):
         if self.gpx_data_3_final is None:
